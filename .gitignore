@@ -1,0 +1,12 @@
+.venv/
+.venv311/
+__pycache__/
+*.pyc
+outputs/
+*.wav
+*.mid
+*.mp3
+*.m4a
+cookies.txt
+.pytest_cache/
+.ruff_cache/

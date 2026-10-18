@@ -1,0 +1,9 @@
+# Entorno pesado: crear con Python 3.11 + CUDA (RTX 4060).
+# Instalar con: pip install -r requirements-full.txt --extra-index-url https://download.pytorch.org/whl/cu121
+-r requirements.txt
+torch
+torchaudio
+demucs
+librosa
+pretty_midi
+basic-pitch
