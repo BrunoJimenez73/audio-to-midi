@@ -7,3 +7,8 @@ demucs
 librosa
 pretty_midi
 basic-pitch
+
+# --- Paso 2: separación UVR (modo "Mejor") ---
+# NO meter audio-separator aquí: declara numpy>=2 y el resolver de pip
+# fallaría (o rompería TensorFlow) contra numpy==1.26.4 que exige TF 2.15.
+# Instalar con: .\scripts\setup_uvr.ps1  (tras instalar este fichero)

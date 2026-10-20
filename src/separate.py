@@ -1,4 +1,5 @@
-"""Separación: Demucs htdemucs_6s (venv 3.11 + CUDA) o fallback numpy."""
+"""Separacion: rapido (Demucs htdemucs_6s) o mejor (jerarquia UVR+Demucs)."""
+import json
 import os
 import shutil
 import subprocess
@@ -11,18 +12,19 @@ from .utils import STEMS, ensure_dir
 
 
 def _demucs_python() -> str | None:
-    """Locate a Python with Demucs installed.
+    """Locate the project venv python (Demucs, audio-separator, torch).
 
     Args:
         None.
 
     Returns:
-        Path to venv python with Demucs, or None.
+        Path to venv python with heavy deps, or None.
     """
-    here = Path(__file__).resolve().parent.parent
-    venv_py = here / ".venv311" / "Scripts" / "python.exe"
-    if venv_py.exists():
-        return str(venv_py)
+    from .utils import find_up
+
+    found = find_up(Path(".venv311") / "Scripts" / "python.exe")
+    if found is not None:
+        return str(found)
     try:
         import demucs  # noqa: F401
         return sys.executable
@@ -30,13 +32,100 @@ def _demucs_python() -> str | None:
         return None
 
 
+def _models_dir() -> Path:
+    """Resolve the audio-separator model cache directory.
+
+    Order: env AUDIO2MIDI_MODELS_DIR, first existing ``models`` dir from the
+    exe/cwd upwards, then ``<exe or cwd>/models`` (created on first use).
+
+    Returns:
+        Models directory (may not exist yet).
+    """
+    env = os.environ.get("AUDIO2MIDI_MODELS_DIR")
+    if env:
+        return Path(env)
+    if getattr(sys, "frozen", False):
+        start = Path(sys.executable).resolve().parent
+    else:
+        start = Path.cwd()
+    for cand in (start, *start.parents):
+        models = cand / "models"
+        if models.is_dir():
+            return models
+    return start / "models"
+
+
+def _run_separator_mejor(
+    mix: Path, dest: Path, models_dir: Path
+) -> dict[str, Path]:
+    """Run the hierarchical \"mejor\" worker (Roformer + Demucs x2).
+
+    Args:
+        mix: Input mixture wav.
+        dest: Output stems directory.
+        models_dir: Cache for downloaded UVR models.
+
+    Returns:
+        Mapping of the 6 stems to wav paths, or empty dict on failure.
+    """
+    py = _demucs_python()
+    from .utils import bundled_path
+
+    worker = bundled_path(Path("scripts") / "separator_worker.py")
+    if py is None or worker is None:
+        return {}
+    models_dir.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    cmd = [py, str(worker), str(mix), str(dest),
+           "--models-dir", str(models_dir)]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, errors="replace",
+            timeout=1800,
+        )
+    except subprocess.TimeoutExpired:
+        print("Separacion Mejor timeout (1800s), usando modo rapido.")
+        return {}
+    payload = None
+    for line in (proc.stdout or "").splitlines():
+        if line.startswith("@@SEPARATOR@@"):
+            try:
+                payload = json.loads(line[len("@@SEPARATOR@@"):])
+            except json.JSONDecodeError:
+                payload = None
+    if payload is None or payload.get("status") != "ok":
+        detail = payload.get("error") if payload else None
+        if detail:
+            print(f"Separacion Mejor fallo: {detail}")
+        else:
+            # stderr mezcla barras de tqdm (contienen 'it/s'); las quitamos.
+            clean = [ln for ln in (proc.stderr or "").splitlines()
+                     if "it/s" not in ln and "%|" not in ln]
+            tail = (clean or ["sin salida"]) [-3:]
+            print(f"Separacion Mejor fallo (rc={proc.returncode}): "
+                  f"{' | '.join(tail)}")
+        return {}
+    stems: dict[str, Path] = {}
+    for name, raw in payload.get("stems", {}).items():
+        path = Path(str(raw))
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        if path.exists():
+            stems[name] = path
+    print(f"Separacion Mejor OK: {payload.get('elapsed')}s "
+          f"(voz={payload.get('vocals_source')}, "
+          f"pasadas={payload.get('stages')})")
+    return stems
+
+
 def _run_demucs(demux_py: str, audio: Path, dest: Path,
-                model: str) -> dict[str, Path]:
+                model: str, shifts: int = 1) -> dict[str, Path]:
     """Run Demucs via subprocess (cuda, fallback cpu).
 
     Args:
         demux_py: Python executable with Demucs.
         audio: Input wav. dest: Output dir. model: Demucs model.
+        shifts: Random shifts averaged (higher = better, slower).
 
     Returns:
         Stem mapping, or empty dict on failure.
@@ -44,7 +133,8 @@ def _run_demucs(demux_py: str, audio: Path, dest: Path,
     tmp = dest / "_demucs_tmp"
     for device in ("cuda", "cpu"):
         cmd = [demux_py, "-m", "demucs.separate", "-n", model,
-               "-d", device, "--out", str(tmp), str(audio)]
+               "-d", device, "--shifts", str(max(1, int(shifts))),
+               "--out", str(tmp), str(audio)]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode == 0:
             break
@@ -66,16 +156,22 @@ def separate_demucs(
     audio_path: str | Path,
     out_dir: str | Path,
     model: str = "htdemucs_6s",
+    shifts: int = 1,
+    sep: str = "mejor",
 ) -> dict[str, Path]:
     """Separate audio into 6 stems.
 
-    Uses Demucs htdemucs_6s on CUDA when the 3.11 venv exists,
-    else the numpy fallback (HPSS + voice mask + band stems).
+    ``sep=\"mejor\"`` runs the hierarchical UVR pipeline (Roformer vocals +
+    htdemucs_ft + htdemucs_6s on the residual) via separator_worker in the
+    3.11 venv; ``sep=\"rapido\"`` runs a single Demucs pass. Both degrade to
+    the numpy HPSS fallback when the heavy tools are unavailable.
 
     Args:
         audio_path: Input wav path.
         out_dir: Directory for stems.
-        model: Demucs model name.
+        model: Demucs model name (modo rapido).
+        shifts: Random shifts averaged (higher = better, slower).
+        sep: Separation mode: mejor | rapido.
 
     Returns:
         Mapping stem name -> wav path.
@@ -83,9 +179,16 @@ def separate_demucs(
     dest = ensure_dir(out_dir)
     if os.environ.get("AUDIO2MIDI_NO_DEMUCS"):
         return _fallback_hpss(Path(audio_path), dest)
+    if sep == "mejor" and not os.environ.get("AUDIO2MIDI_NO_UVR"):
+        got = _run_separator_mejor(Path(audio_path), dest, _models_dir())
+        if len(got) == len(STEMS):
+            print(f"Separacion Mejor OK ({len(got)} stems).")
+            return got
+        if got:
+            print("Separacion Mejor incompleta, usando modo rapido.")
     demux_py = _demucs_python()
     if demux_py is not None:
-        got = _run_demucs(demux_py, Path(audio_path), dest, model)
+        got = _run_demucs(demux_py, Path(audio_path), dest, model, shifts)
         if len(got) >= 4:
             print(f"Demucs {model} OK ({len(got)} stems).")
             return got
@@ -107,7 +210,7 @@ def _transient_part(y: np.ndarray, sr: int) -> np.ndarray:
     n_fft, hop = 2048, 512
     spec = stft(y, n_fft, hop)
     mag = np.abs(spec).astype(np.float64)
-    flux = np.maximum(0.0, np.diff(mag, axis=1)).sum(axis=0)
+    flux = np.maximum(0, np.diff(mag, axis=1)).sum(axis=0)
     flux = np.concatenate([[flux[0]], flux])
     thr = float(np.median(flux) + np.std(flux))
     gate = np.clip(flux / (thr + 1e-9) - 0.5, 0.06, 1.0)

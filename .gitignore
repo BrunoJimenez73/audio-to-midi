@@ -8,5 +8,9 @@ outputs/
 *.mp3
 *.m4a
 cookies.txt
+models/
+build/
+dist/
+audio-to-midi.spec
 .pytest_cache/
 .ruff_cache/

@@ -50,6 +50,7 @@ def test_drums_on_clicks(tmp_path: Path) -> None:
 def test_pipeline_e2e(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Full pipeline on synth audio produces stems + full_mix."""
     monkeypatch.setenv("AUDIO2MIDI_NO_DEMUCS", "1")
+    monkeypatch.setenv("AUDIO2MIDI_NO_UVR", "1")
     monkeypatch.setenv("AUDIO2MIDI_NO_BP", "1")
     wav = _sine_wav(tmp_path / "in.wav")
     res = run_pipeline(str(wav), out_root=tmp_path / "outputs")
@@ -57,6 +58,24 @@ def test_pipeline_e2e(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert full.exists() and full.stat().st_size > 0
     stems = res["stems"]
     assert isinstance(stems, dict) and len(stems) == 6
+
+
+def test_uvr_gate_skips_mejor(tmp_path: Path,
+                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """AUDIO2MIDI_NO_UVR keeps sep=mejor on the fast path."""
+    monkeypatch.setenv("AUDIO2MIDI_NO_DEMUCS", "1")
+    monkeypatch.setenv("AUDIO2MIDI_NO_UVR", "1")
+    import src.separate as sep_mod
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        sep_mod, "_run_separator_mejor",
+        lambda *a, **k: calls.append(1) or {},
+    )
+    wav = _sine_wav(tmp_path / "in.wav")
+    stems = sep_mod.separate_demucs(wav, tmp_path / "stems", sep="mejor")
+    assert calls == []
+    assert len(stems) == 6
 
 
 def test_separate_fallback(tmp_path: Path) -> None:

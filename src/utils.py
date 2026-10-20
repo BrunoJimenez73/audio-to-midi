@@ -1,4 +1,5 @@
 """Utilidades compartidas: rutas, validación, constantes MIDI."""
+import sys
 from pathlib import Path
 
 STEMS = ("drums", "bass", "vocals", "guitar", "piano", "other")
@@ -39,3 +40,49 @@ def is_youtube_url(value: str) -> bool:
     """
     v = value.lower()
     return "youtube.com" in v or "youtu.be" in v
+
+
+def bundled_path(rel: str | Path) -> Path | None:
+    """Find a data file bundled by PyInstaller or present in the repo.
+
+    Checks sys._MEIPASS (frozen) first, then walks up from the source
+    root and the executable directory.
+
+    Args:
+        rel: Relative path (e.g. 'scripts/basicpitch_worker.py').
+
+    Returns:
+        Absolute path if found, else None.
+    """
+    rel_p = Path(rel)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        cand = Path(meipass) / rel_p
+        if cand.exists():
+            return cand
+    roots: list[Path] = []
+    if getattr(sys, "frozen", False):
+        roots.append(Path(sys.executable).resolve().parent)
+    roots.append(Path(__file__).resolve().parent.parent)
+    seen: set[Path] = set()
+    for root in roots:
+        for base in (root, *list(root.parents)[:6]):
+            if base in seen:
+                continue
+            seen.add(base)
+            cand = base / rel_p
+            if cand.exists():
+                return cand
+    return None
+
+
+def find_up(rel: str | Path) -> Path | None:
+    """Find a file/dir by walking up from exe dir and source root.
+
+    Args:
+        rel: Relative path to look for (e.g. '.venv311/Scripts/python.exe').
+
+    Returns:
+        Absolute path if found, else None.
+    """
+    return bundled_path(rel)

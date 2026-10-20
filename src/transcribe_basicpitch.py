@@ -27,16 +27,17 @@ def bp_python() -> str | None:
     Returns:
         Path to python, or None.
     """
-    here = Path(__file__).resolve().parent.parent
-    venv_py = here / ".venv311" / "Scripts" / "python.exe"
-    if venv_py.exists():
+    from .utils import find_up
+
+    found = find_up(Path(".venv311") / "Scripts" / "python.exe")
+    if found is not None:
         try:
             proc = subprocess.run(
-                [str(venv_py), "-c", "import basic_pitch"],
+                [str(found), "-c", "import basic_pitch"],
                 capture_output=True, text=True, timeout=60,
             )
             if proc.returncode == 0:
-                return str(venv_py)
+                return str(found)
         except Exception:  # noqa: BLE001
             pass
     try:
@@ -111,7 +112,11 @@ def _run_worker(stem_wavs: dict[str, Path]) -> dict[str, list[dict]]:
     py = bp_python()
     if py is None:
         return {}
-    worker = Path(__file__).resolve().parent.parent / "scripts" / "basicpitch_worker.py"
+    from .utils import bundled_path
+
+    worker = bundled_path(Path("scripts") / "basicpitch_worker.py")
+    if worker is None:
+        return {}
     args = [f"{inst}={wav}" for inst, wav in stem_wavs.items()]
     proc = subprocess.run(
         [py, str(worker), *args],
@@ -126,6 +131,10 @@ def _run_worker(stem_wavs: dict[str, Path]) -> dict[str, list[dict]]:
         if isinstance(data, dict) and "error" in data:
             continue
         result[key] = data
+    if not result:
+        print(f"BP worker vacío: rc={proc.returncode} "
+              f"stderr={(proc.stderr or '')[-400:]!r} "
+              f"stdout={(proc.stdout or '')[-200:]!r}")
     return result
 
 

@@ -11,7 +11,11 @@ import sys
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Raíz del proyecto solo si contiene src/ (en el bundle PyInstaller
+# dirname² = _internal: insertarlo PENSARÍA stdlib con .pyd de 3.14).
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if os.path.isdir(os.path.join(_root, "src")):
+    sys.path.insert(0, _root)
 try:
     from src.transcribe_melodic import RANGES as _RANGES
 except Exception:  # noqa: BLE001
@@ -69,6 +73,10 @@ def main() -> int:
         print("usage: basicpitch_worker.py <instrument>=<wav> [...]",
               file=sys.stderr)
         return 2
+    print(f"worker boot: exe={sys.executable} ver={sys.version.split()[0]} "
+          f"PYTHONPATH={os.environ.get('PYTHONPATH')!r} "
+          f"PYTHONHOME={os.environ.get('PYTHONHOME')!r}",
+          file=sys.stderr, flush=True)
     status = 0
     for arg in sys.argv[1:]:
         inst, _, wav = arg.partition("=")

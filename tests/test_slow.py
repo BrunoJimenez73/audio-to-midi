@@ -26,7 +26,7 @@ def test_demucs_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     if _demucs_python() is None:
         pytest.skip("Demucs no disponible")
     wav = _sine_wav(tmp_path / "in.wav")
-    res = run_pipeline(str(wav), out_root=tmp_path / "out")
+    res = run_pipeline(str(wav), out_root=tmp_path / "out", sep="rapido")
     assert Path(str(res["full_mix"])).exists()
     stems = res["stems"]
     assert isinstance(stems, dict) and len(stems) == 6
@@ -38,9 +38,9 @@ def test_basicpitch_smoke(tmp_path: Path) -> None:
     try:
         import basic_pitch  # noqa: F401
     except ImportError:
-        from src.transcribe_basicpitch import _basicpitch_python
+        from src.transcribe_basicpitch import bp_python
 
-        if _basicpitch_python() is None:
+        if bp_python() is None:
             pytest.skip("Basic Pitch no disponible")
     wav = _sine_wav(tmp_path / "a4.wav")
     notes = transcribe_melodic(wav, "piano", backend="basicpitch")

@@ -42,6 +42,11 @@ def run_pipeline(
     progress: object = None,
     bpm: float = 0.0,
     grid_beats: float = 0.25,
+    model: str = "htdemucs_6s",
+    shifts: int = 1,
+    sep: str = "mejor",
+    backend: str = "auto",
+    drums: bool = True,
 ) -> dict[str, object]:
     """Run full pipeline and return artifact paths.
 
@@ -50,6 +55,12 @@ def run_pipeline(
         out_root: Base outputs directory.
         progress: Optional gradio Progress-like callable.
         bpm: Forced tempo (0 = auto-estimate).
+        grid_beats: Quantization grid in beats (<= 0 disables it).
+        model: Demucs model name.
+        shifts: Demucs random shifts (higher = better, slower).
+        sep: Separation mode: mejor | rapido.
+        backend: Transcription backend: auto | bp | numpy.
+        drums: Whether to transcribe the drums stem.
 
     Returns:
         Dict with keys: run_dir, mix, stems, midis, full_mix, notes_count, bpm.
@@ -65,23 +76,28 @@ def run_pipeline(
     run_dir = ensure_dir(Path(out_root) / run_id)
     say(0.05, "Preparando audio...")
     mix = prepare_input(user_input, run_dir / "work")
-    say(0.25, "Separando stems...")
-    stems = separate_demucs(mix, run_dir / "stems")
+    if sep == "mejor":
+        say(0.25, "Separando stems (Mejor: UVR + Demucs, ~2-4 min)...")
+    else:
+        say(0.25, "Separando stems...")
+    stems = separate_demucs(mix, run_dir / "stems", model=model,
+                            shifts=shifts, sep=sep)
     stems_real = _stems_are_stereodemucs(stems)
     say(0.5, "Transcribiendo melodías...")
     pools: dict[str, list[dict]] = {}
     bp_done = False
-    if stems_real:
+    if backend != "numpy" and stems_real:
         try:
             from .transcribe_basicpitch import bp_available, transcribe_basicpitch_batch
 
-            if bp_available():
+            if backend == "bp" or bp_available():
                 wav_map = {i: stems[i] for i in MELODIC
                            if stems.get(i) is not None and stems[i].exists()}
                 pools = transcribe_basicpitch_batch(wav_map)
                 bp_done = True
                 say(0.8, "Basic Pitch OK")
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            print(f"BP batch falló: {exc!r}")
             bp_done = False
     if not bp_done:
         for i, inst in enumerate(MELODIC):
@@ -97,7 +113,7 @@ def run_pipeline(
     say(0.85, "Transcribiendo batería...")
     drums_wav = stems.get("drums")
     drum_list: list[dict] = []
-    if drums_wav is not None and drums_wav.exists():
+    if drums and drums_wav is not None and drums_wav.exists():
         try:
             import soundfile as _sf
 
@@ -160,9 +176,10 @@ def run_pipeline(
         drum_list = []  # sin batería real: hits de guitarra, no batería
         tracks_notes["drums"] = []
     say(0.94, f"Tempo {tempo} BPM, cuantizando...")
-    for inst in tracks_notes:
-        tracks_notes[inst] = quantize_notes(tracks_notes[inst], tempo,
-                                           grid_beats=grid_beats)
+    if grid_beats and grid_beats > 0:
+        for inst in tracks_notes:
+            tracks_notes[inst] = quantize_notes(tracks_notes[inst], tempo,
+                                               grid_beats=grid_beats)
     midi_dir = ensure_dir(run_dir / "midi")
     midis: dict[str, Path] = {}
     import mido as _mido

@@ -1,4 +1,4 @@
-# TODO — audio-to-midi
+# TODO - audio-to-midi
 
 - [x] Harness (AGENTS.md, docs, scripts, tests esqueleto)
 - [x] Fase 1: ingest (yt-dlp + ffmpeg) real + test
@@ -8,10 +8,14 @@
 - [x] Fase 5: midi_merge multicanal + midis por pista
 - [x] Fase 6: app.py Gradio presentable
 - [x] E2E con mp3 sintético verificado
-- [x] Venv Python 3.11 + torch CUDA + Demucs htdemucs_6s (disponible)
-- [x] Basic Pitch integrado (backend opcional)
-- [x] ZIP de descarga + cuantización en app
+- [x] Venv Python 3.11 + torch CUDA + Demucs htdemucs_6s (GPU, ~17s/tema)
+- [x] Basic Pitch como transcriptor por defecto (worker batch, umbrales voz)
+- [x] E2E real YouTube (tema 5:18) verificado, v8 en outputs/20261018_183408
+- [x] UI ampliada: modelo/shifts Demucs, backend, BPM, cuantización, batería on/off
+- [x] ZIP de descarga + MIDI por pista en UI
 - [x] Tests slow (Demucs, Basic Pitch) + CI
-- [ ] Probar con mp3 real + URL YouTube corta
-- [ ] MT3 (no disponible) — sustituido por Basic Pitch
-- [ ] Modelo ADT dedicado para batería
+- [x] Exe Windows (PyInstaller onedir, `scripts\build_exe.ps1`) + `--selftest` + UI HTTP 200
+- [x] Separación "Mejor": audio-separator jerárquico (Roformer+Demucs), radio UI, bench A/B, setup_uvr.ps1
+- [ ] Cuantización adaptativa (8as para voz/líneas largas)
+- [ ] Modelo ADT dedicado para batería (mejor que onsets+rejilla)
+- [ ] Probar con más temas (rock con batería fuerte, piano solo)
